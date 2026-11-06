@@ -60,3 +60,17 @@ schools/*/raw/*.docx
 schools/*/raw/*.pdf
 data/
 tmp/
+
+# Reports
+report/
+coverage/
+coverage.xml
+lcov.info
+.coverage
+
+# Next.js
+.next/
+next-env.d.ts
+
+# Lockfiles kept but artifacts excluded
+*.tsbuildinfo

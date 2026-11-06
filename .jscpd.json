@@ -1,0 +1,27 @@
+{
+  "threshold": 2.5,
+  "reporters": ["html", "console", "json"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/.next/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.venv/**",
+    "**/coverage/**",
+    "**/htmlcov/**",
+    "**/*.lock",
+    "**/package-lock.json",
+    "**/__tests__/**",
+    "**/tests/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.test.py",
+    "**/test_*.py",
+    "**/packages/design-tokens/**"
+  ],
+  "format": ["typescript", "tsx", "javascript", "jsx", "python"],
+  "absolute": true,
+  "gitignore": true,
+  "minTokens": 60,
+  "minLines": 10
+}

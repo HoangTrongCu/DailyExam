@@ -170,22 +170,6 @@ def create_app() -> FastAPI:
         rows = submission_service.student_analytics(db, user.id)
         return [AnalyticsEntry(**r) for r in rows]
 
-    # ─── Teacher ─────────────────────────────────────────────
-    @app.get("/api/teacher/submissions", tags=["teacher"])
-    def teacher_submissions(
-        db: Session = Depends(get_db),
-        user: models.User = Depends(require_role("teacher", "admin")),
-    ) -> list[dict]:
-        rows = (
-            db.query(models.Submission)
-            .join(models.User, models.Submission.student_id == models.User.id)
-            .filter(models.User.school_id == user.school_id)
-            .order_by(models.Submission.graded_at.desc())
-            .limit(100)
-            .all()
-        )
-        return [_submission_view(s) for s in rows]
-
     return app
 
 

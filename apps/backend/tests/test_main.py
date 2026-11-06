@@ -160,21 +160,3 @@ class TestSubmissions:
         assert ana.status_code == 200
 
 
-class TestTeacher:
-    def test_teacher_sees_submissions(self, client) -> None:
-        student = _register(client, "hs5@y.vn")
-        exam = client.get("/api/schools/cau_giay/exams/2026-11-07").json()
-        client.post(
-            "/api/submissions",
-            json={"exam_id": exam["id"], "answers": {exam["questions"][0]["id"]: "A"}},
-            headers=_auth(student["access_token"]),
-        )
-        teacher = _register(client, "t2@y.vn", role="teacher")
-        resp = client.get("/api/teacher/submissions", headers=_auth(teacher["access_token"]))
-        assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
-
-    def test_student_cannot_see_teacher_endpoint(self, client) -> None:
-        student = _register(client, "hs6@y.vn")
-        resp = client.get("/api/teacher/submissions", headers=_auth(student["access_token"]))
-        assert resp.status_code == 403

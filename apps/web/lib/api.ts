@@ -107,5 +107,4 @@ export const api = {
     request<Submission>('/api/submissions', { method: 'POST', body: JSON.stringify({ exam_id, answers }), token }),
   mySubmissions: (token: string) => request<Submission[]>('/api/me/submissions', { token }),
   myAnalytics: (token: string) => request<AnalyticsEntry[]>('/api/me/analytics', { token }),
-  teacherSubmissions: (token: string) => request<Submission[]>('/api/teacher/submissions', { token }),
 };

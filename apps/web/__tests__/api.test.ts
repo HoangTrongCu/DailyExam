@@ -89,11 +89,10 @@ describe('api client', () => {
     expect(fetchMock.mock.calls[0][0]).toContain('/api/auth/register');
   });
 
-  it('teacherSubmissions and analytics', async () => {
+  it('myAnalytics fetches', async () => {
     fetchMock.mockResolvedValue(mockResponse(200, []));
-    await api.teacherSubmissions('t');
     await api.myAnalytics('t');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('me adds auth header', async () => {

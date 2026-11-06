@@ -21,17 +21,34 @@ def client(tmp_path, monkeypatch):
         yield c
 
 
-def _register(client, email: str, role: str = "student"):
-    resp = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "pass1234", "full_name": "X", "role": role, "school_id": "cau_giay"},
-    )
-    assert resp.status_code == 200
-    return resp.json()
-
-
 def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _admin_token(client):
+    """Login as seeded admin to get a token."""
+    resp = client.post("/api/auth/login", json={"email": "admin@demo.vn", "password": "demo1234"})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["access_token"]
+
+
+def _register_and_approve(client, email: str, role: str = "student"):
+    """Register a pending user, then approve via admin, then return the login token."""
+    reg = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "pass1234", "full_name": email, "school_id": "cau_giay"},
+    )
+    assert reg.status_code == 200, reg.text
+    user_id = reg.json()["user_id"]
+    # Approve
+    admin_token = _admin_token(client)
+    approve = client.post(f"/api/admin/users/{user_id}/approve", headers=_auth(admin_token))
+    assert approve.status_code == 200
+    # Optionally promote role (seeded admin only; we just change via DB in tests when needed)
+    # Login as the new user
+    login = client.post("/api/auth/login", json={"email": email, "password": "pass1234"})
+    assert login.status_code == 200, login.text
+    return login.json()
 
 
 class TestHealth:
@@ -40,29 +57,93 @@ class TestHealth:
 
 
 class TestAuth:
-    def test_register_login_me(self, client) -> None:
-        reg = _register(client, "x@y.vn")
-        assert reg["access_token"]
-        login = client.post("/api/auth/login", json={"email": "x@y.vn", "password": "pass1234"})
-        assert login.status_code == 200
-        me = client.get("/api/auth/me", headers=_auth(login.json()["access_token"]))
+    def test_register_returns_pending(self, client) -> None:
+        resp = client.post(
+            "/api/auth/register",
+            json={"email": "new@y.vn", "password": "pass1234", "full_name": "New"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "pending"
+        assert "access_token" not in body
+
+    def test_pending_cannot_login(self, client) -> None:
+        client.post(
+            "/api/auth/register",
+            json={"email": "pending@y.vn", "password": "pass1234", "full_name": "P"},
+        )
+        resp = client.post("/api/auth/login", json={"email": "pending@y.vn", "password": "pass1234"})
+        assert resp.status_code == 403
+        assert "phê duyệt" in resp.json()["detail"]
+
+    def test_register_login_me_after_approval(self, client) -> None:
+        tok = _register_and_approve(client, "x@y.vn")
+        assert tok["access_token"]
+        me = client.get("/api/auth/me", headers=_auth(tok["access_token"]))
         assert me.json()["email"] == "x@y.vn"
 
     def test_duplicate_register_fails(self, client) -> None:
-        _register(client, "dup@y.vn")
+        client.post("/api/auth/register", json={"email": "dup@y.vn", "password": "pass1234", "full_name": "X"})
         resp = client.post(
             "/api/auth/register",
-            json={"email": "dup@y.vn", "password": "pass1234", "full_name": "X", "role": "student"},
+            json={"email": "dup@y.vn", "password": "pass1234", "full_name": "X"},
         )
         assert resp.status_code == 400
 
     def test_invalid_login(self, client) -> None:
-        _register(client, "a@y.vn")
+        _register_and_approve(client, "a@y.vn")
         resp = client.post("/api/auth/login", json={"email": "a@y.vn", "password": "wrong"})
         assert resp.status_code == 401
 
     def test_me_without_token(self, client) -> None:
         assert client.get("/api/auth/me").status_code == 401
+
+
+class TestAdminApproval:
+    def test_admin_lists_pending(self, client) -> None:
+        client.post("/api/auth/register", json={"email": "p1@y.vn", "password": "pass1234", "full_name": "P1"})
+        client.post("/api/auth/register", json={"email": "p2@y.vn", "password": "pass1234", "full_name": "P2"})
+        tok = _admin_token(client)
+        resp = client.get("/api/admin/users?status=pending", headers=_auth(tok))
+        assert resp.status_code == 200
+        pending = resp.json()
+        assert len(pending) >= 2
+        assert all(u["status"] == "pending" for u in pending)
+
+    def test_non_admin_cannot_list(self, client) -> None:
+        tok = _register_and_approve(client, "notadmin@y.vn")
+        resp = client.get("/api/admin/users?status=pending", headers=_auth(tok["access_token"]))
+        assert resp.status_code == 403
+
+    def test_approve_allows_login(self, client) -> None:
+        reg = client.post(
+            "/api/auth/register",
+            json={"email": "ap@y.vn", "password": "pass1234", "full_name": "A"},
+        ).json()
+        tok = _admin_token(client)
+        client.post(f"/api/admin/users/{reg['user_id']}/approve", headers=_auth(tok))
+        login = client.post("/api/auth/login", json={"email": "ap@y.vn", "password": "pass1234"})
+        assert login.status_code == 200
+
+    def test_reject_blocks_login(self, client) -> None:
+        reg = client.post(
+            "/api/auth/register",
+            json={"email": "rj@y.vn", "password": "pass1234", "full_name": "R"},
+        ).json()
+        tok = _admin_token(client)
+        client.post(f"/api/admin/users/{reg['user_id']}/reject", headers=_auth(tok))
+        login = client.post("/api/auth/login", json={"email": "rj@y.vn", "password": "pass1234"})
+        assert login.status_code == 403
+
+    def test_approve_missing_user(self, client) -> None:
+        tok = _admin_token(client)
+        resp = client.post("/api/admin/users/no-such-id/approve", headers=_auth(tok))
+        assert resp.status_code == 404
+
+    def test_reject_missing_user(self, client) -> None:
+        tok = _admin_token(client)
+        resp = client.post("/api/admin/users/no-such-id/reject", headers=_auth(tok))
+        assert resp.status_code == 404
 
 
 class TestSchools:
@@ -84,16 +165,16 @@ class TestExams:
         assert exam["school_id"] == "cau_giay"
         assert len(exam["questions"]) == 10
 
-    def test_teacher_can_regenerate(self, client) -> None:
-        teacher = _register(client, "teacher@y.vn", role="teacher")
+    def test_admin_can_regenerate(self, client) -> None:
+        tok = _admin_token(client)
         resp = client.post(
             "/api/schools/cau_giay/exams/2026-11-08/generate",
-            headers=_auth(teacher["access_token"]),
+            headers=_auth(tok),
         )
         assert resp.status_code == 200
 
     def test_student_cannot_force_regenerate(self, client) -> None:
-        student = _register(client, "s@y.vn")
+        student = _register_and_approve(client, "s@y.vn")
         resp = client.post(
             "/api/schools/cau_giay/exams/2026-11-09/generate",
             headers=_auth(student["access_token"]),
@@ -103,7 +184,7 @@ class TestExams:
 
 class TestSubmissions:
     def test_submit_full_cycle(self, client) -> None:
-        student = _register(client, "hs@y.vn")
+        student = _register_and_approve(client, "hs@y.vn")
         exam = client.get("/api/schools/cau_giay/exams/2026-11-07").json()
         answers = {}
         # Fill a couple correct answers (use the auto-generated correct via view)
@@ -128,7 +209,7 @@ class TestSubmissions:
         assert resp.status_code == 401
 
     def test_invalid_exam_id(self, client) -> None:
-        student = _register(client, "hs2@y.vn")
+        student = _register_and_approve(client, "hs2@y.vn")
         resp = client.post(
             "/api/submissions",
             json={"exam_id": "badformat", "answers": {}},
@@ -137,7 +218,7 @@ class TestSubmissions:
         assert resp.status_code == 400
 
     def test_invalid_date(self, client) -> None:
-        student = _register(client, "hs3@y.vn")
+        student = _register_and_approve(client, "hs3@y.vn")
         resp = client.post(
             "/api/submissions",
             json={"exam_id": "cau_giay:bad-date", "answers": {}},
@@ -146,7 +227,7 @@ class TestSubmissions:
         assert resp.status_code == 400
 
     def test_my_submissions_and_analytics(self, client) -> None:
-        student = _register(client, "hs4@y.vn")
+        student = _register_and_approve(client, "hs4@y.vn")
         exam = client.get("/api/schools/cau_giay/exams/2026-11-07").json()
         client.post(
             "/api/submissions",

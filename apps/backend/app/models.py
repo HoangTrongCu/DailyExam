@@ -38,9 +38,12 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # student / teacher / admin
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")  # pending / active / rejected
     school_id: Mapped[str | None] = mapped_column(String(50), ForeignKey("schools.id"), nullable=True)
     grade: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
 
 class Template(Base):

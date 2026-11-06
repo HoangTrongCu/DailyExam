@@ -25,9 +25,13 @@ export default function LoginPage() {
     try {
       const user = await api.login({ email, password });
       setUser(user);
-      router.push('/dashboard');
+      router.push(user.role === 'admin' ? '/admin' : '/dashboard');
     } catch (err) {
-      setError(err instanceof ApiError ? 'Email hoặc mật khẩu sai' : 'Lỗi kết nối');
+      if (err instanceof ApiError) {
+        setError(err.detail ?? 'Email hoặc mật khẩu sai');
+      } else {
+        setError('Lỗi kết nối');
+      }
     } finally {
       setLoading(false);
     }
@@ -98,6 +102,8 @@ export default function LoginPage() {
           <Badge variant="info">Demo</Badge>
           <div style={{ marginTop: 8 }}>
             Học sinh: <strong>hs@demo.vn</strong> / <strong>demo1234</strong>
+            <br />
+            Admin: <strong>admin@demo.vn</strong> / <strong>demo1234</strong>
           </div>
         </div>
       </Card>

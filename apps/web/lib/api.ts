@@ -1,4 +1,5 @@
 export type Role = 'student' | 'teacher' | 'admin';
+export type UserStatus = 'pending' | 'active' | 'rejected';
 
 export interface AuthUser {
   user_id: string;
@@ -6,6 +7,18 @@ export interface AuthUser {
   full_name: string;
   school_id: string | null;
   access_token: string;
+}
+
+export interface PendingUser {
+  id: string;
+  email: string;
+  full_name: string;
+  role: Role;
+  status: UserStatus;
+  school_id: string | null;
+  grade: string | null;
+  created_at: string | null;
+  approved_at: string | null;
 }
 
 export interface Question {
@@ -60,6 +73,12 @@ export interface AnalyticsEntry {
   average_score_10: number;
 }
 
+export interface RegisterResponse {
+  user_id: string;
+  status: UserStatus;
+  message: string;
+}
+
 const DEFAULT_BASE =
   typeof window !== 'undefined'
     ? process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
@@ -67,9 +86,11 @@ const DEFAULT_BASE =
 
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly detail?: string;
+  constructor(status: number, message: string, detail?: string) {
     super(message);
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -87,7 +108,13 @@ async function request<T>(
   const resp = await fetch(`${base}${path}`, { ...rest, headers: finalHeaders });
   if (!resp.ok) {
     const body = await resp.text();
-    throw new ApiError(resp.status, body || resp.statusText);
+    let detail: string | undefined;
+    try {
+      detail = JSON.parse(body).detail;
+    } catch {
+      // ignore
+    }
+    throw new ApiError(resp.status, body || resp.statusText, detail);
   }
   if (resp.status === 204) return undefined as T;
   return (await resp.json()) as T;
@@ -95,8 +122,8 @@ async function request<T>(
 
 export const api = {
   health: () => request<{ status: string }>('/health'),
-  register: (data: { email: string; password: string; full_name: string; role: Role; school_id?: string | null }) =>
-    request<AuthUser>('/api/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+  register: (data: { email: string; password: string; full_name: string; role?: Role; school_id?: string | null }) =>
+    request<RegisterResponse>('/api/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   login: (data: { email: string; password: string }) =>
     request<AuthUser>('/api/auth/login', { method: 'POST', body: JSON.stringify(data) }),
   me: (token: string) => request<{ id: string; email: string; full_name: string; role: Role; school_id: string | null }>('/api/auth/me', { token }),
@@ -107,4 +134,10 @@ export const api = {
     request<Submission>('/api/submissions', { method: 'POST', body: JSON.stringify({ exam_id, answers }), token }),
   mySubmissions: (token: string) => request<Submission[]>('/api/me/submissions', { token }),
   myAnalytics: (token: string) => request<AnalyticsEntry[]>('/api/me/analytics', { token }),
+  adminListUsers: (token: string, status: UserStatus = 'pending') =>
+    request<PendingUser[]>(`/api/admin/users?status=${status}`, { token }),
+  adminApprove: (token: string, userId: string) =>
+    request<PendingUser>(`/api/admin/users/${userId}/approve`, { method: 'POST', token }),
+  adminReject: (token: string, userId: string) =>
+    request<PendingUser>(`/api/admin/users/${userId}/reject`, { method: 'POST', token }),
 };

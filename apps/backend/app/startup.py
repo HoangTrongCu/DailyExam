@@ -45,8 +45,7 @@ def seed_initial_data() -> None:
 
         demo_users = [
             ("hs@demo.vn", "Nguyễn Văn Nam", "student", "cau_giay"),
-            ("gv@demo.vn", "Cô Lan", "teacher", "cau_giay"),
-            ("admin@demo.vn", "Admin", "admin", None),
+            ("admin@demo.vn", "Admin DailyExam", "admin", None),
         ]
         for email, name, role, school_id in demo_users:
             if not db.query(models.User).filter_by(email=email).first():
@@ -56,6 +55,7 @@ def seed_initial_data() -> None:
                         password_hash=hash_password("demo1234"),
                         full_name=name,
                         role=role,
+                        status="active",
                         school_id=school_id,
                         grade="lop_5" if role == "student" else None,
                     )

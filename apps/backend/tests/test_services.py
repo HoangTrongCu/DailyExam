@@ -92,8 +92,8 @@ class TestExamService:
 
 # ─── user_service ─────────────────────────────────────────
 class TestUserService:
-    def test_create_and_authenticate(self, db) -> None:
-        user = user_service.create_user(db, "a@b.c", "pass1234", "A")
+    def test_create_and_authenticate_active(self, db) -> None:
+        user = user_service.create_user(db, "a@b.c", "pass1234", "A", status="active")
         assert user_service.authenticate(db, "a@b.c", "pass1234").id == user.id
 
     def test_duplicate_email_raises(self, db) -> None:
@@ -102,11 +102,54 @@ class TestUserService:
             user_service.create_user(db, "a@b.c", "pass5678", "A2")
 
     def test_authenticate_bad_password(self, db) -> None:
-        user_service.create_user(db, "a@b.c", "pass1234", "A")
-        assert user_service.authenticate(db, "a@b.c", "wrong") is None
+        user_service.create_user(db, "a@b.c", "pass1234", "A", status="active")
+        with pytest.raises(user_service.AccountStatusError) as exc_info:
+            user_service.authenticate(db, "a@b.c", "wrong")
+        assert exc_info.value.status == "invalid"
 
     def test_authenticate_missing_user(self, db) -> None:
-        assert user_service.authenticate(db, "none@x.y", "p") is None
+        with pytest.raises(user_service.AccountStatusError):
+            user_service.authenticate(db, "none@x.y", "p")
+
+    def test_pending_cannot_authenticate(self, db) -> None:
+        user_service.create_user(db, "p@b.c", "pass1234", "P")  # default pending
+        with pytest.raises(user_service.AccountStatusError) as exc_info:
+            user_service.authenticate(db, "p@b.c", "pass1234")
+        assert exc_info.value.status == "pending"
+
+    def test_rejected_cannot_authenticate(self, db) -> None:
+        user_service.create_user(db, "r@b.c", "pass1234", "R", status="rejected")
+        with pytest.raises(user_service.AccountStatusError) as exc_info:
+            user_service.authenticate(db, "r@b.c", "pass1234")
+        assert exc_info.value.status == "rejected"
+
+    def test_approve_user(self, db) -> None:
+        user = user_service.create_user(db, "pend@b.c", "pass1234", "P")
+        approved = user_service.set_user_status(db, user.id, "active", "admin1")
+        assert approved.status == "active"
+        assert approved.approved_by == "admin1"
+        assert approved.approved_at is not None
+
+    def test_reject_user(self, db) -> None:
+        user = user_service.create_user(db, "pend2@b.c", "pass1234", "P")
+        rejected = user_service.set_user_status(db, user.id, "rejected", "admin1")
+        assert rejected.status == "rejected"
+
+    def test_set_status_invalid(self, db) -> None:
+        user = user_service.create_user(db, "x@b.c", "pass1234", "X")
+        with pytest.raises(ValueError):
+            user_service.set_user_status(db, user.id, "garbage")
+
+    def test_set_status_missing_user(self, db) -> None:
+        with pytest.raises(ValueError):
+            user_service.set_user_status(db, "no-such-id", "active")
+
+    def test_list_pending(self, db) -> None:
+        user_service.create_user(db, "a1@b.c", "pass1234", "A1")
+        user_service.create_user(db, "a2@b.c", "pass1234", "A2")
+        user_service.create_user(db, "a3@b.c", "pass1234", "A3", status="active")
+        pending = user_service.list_users_by_status(db, "pending")
+        assert len(pending) == 2
 
 
 # ─── submission_service end-to-end ────────────────────────
@@ -114,7 +157,7 @@ class TestSubmissionService:
     def test_submit_grades_and_persists(self, db) -> None:
         _seed_school(db)
         student = user_service.create_user(
-            db, "hs@x.vn", "p1234567", "Nam", role="student", school_id="cau_giay"
+            db, "hs@x.vn", "p1234567", "Nam", role="student", school_id="cau_giay", status="active"
         )
         exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
         first_q = exam.exam_data["questions"][0]
@@ -125,7 +168,7 @@ class TestSubmissionService:
 
     def test_submit_is_idempotent(self, db) -> None:
         _seed_school(db)
-        student = user_service.create_user(db, "hs2@x.vn", "p1234567", "Hà", school_id="cau_giay")
+        student = user_service.create_user(db, "hs2@x.vn", "p1234567", "Hà", school_id="cau_giay", status="active")
         exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
         first = submission_service.submit_and_grade(db, exam, student, {})
         second = submission_service.submit_and_grade(db, exam, student, {})
@@ -133,7 +176,7 @@ class TestSubmissionService:
 
     def test_history_and_analytics(self, db) -> None:
         _seed_school(db)
-        student = user_service.create_user(db, "hs3@x.vn", "p1234567", "An", school_id="cau_giay")
+        student = user_service.create_user(db, "hs3@x.vn", "p1234567", "An", school_id="cau_giay", status="active")
         exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
         first_q = exam.exam_data["questions"][0]
         submission_service.submit_and_grade(

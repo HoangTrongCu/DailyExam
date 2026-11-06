@@ -95,6 +95,38 @@ describe('api client', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('adminListUsers passes status in query', async () => {
+    fetchMock.mockResolvedValue(mockResponse(200, []));
+    await api.adminListUsers('t', 'pending');
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/admin/users?status=pending');
+  });
+
+  it('adminApprove posts', async () => {
+    fetchMock.mockResolvedValue(mockResponse(200, { id: 'u1' }));
+    await api.adminApprove('t', 'u1');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/api/admin/users/u1/approve');
+    expect(init.method).toBe('POST');
+  });
+
+  it('adminReject posts', async () => {
+    fetchMock.mockResolvedValue(mockResponse(200, { id: 'u1' }));
+    await api.adminReject('t', 'u1');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/api/admin/users/u1/reject');
+    expect(init.method).toBe('POST');
+  });
+
+  it('ApiError includes detail', async () => {
+    fetchMock.mockResolvedValue(mockResponse(403, { detail: 'Chờ phê duyệt' }));
+    try {
+      await api.login({ email: 'a@b.c', password: 'x' });
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).detail).toBe('Chờ phê duyệt');
+    }
+  });
+
   it('me adds auth header', async () => {
     fetchMock.mockResolvedValue(mockResponse(200, { id: 'u', email: 'a@b.c', full_name: 'A', role: 'student', school_id: null }));
     await api.me('tok');

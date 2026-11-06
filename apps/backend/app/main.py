@@ -50,34 +50,35 @@ def create_app() -> FastAPI:
         return HealthResponse(status="ok", environment=settings.environment, version=__version__)
 
     # ─── Auth ────────────────────────────────────────────────
-    @app.post("/api/auth/register", response_model=TokenResponse, tags=["auth"])
-    def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    @app.post("/api/auth/register", tags=["auth"])
+    def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> dict:
+        """Create a pending account. Must be approved by an admin before login."""
         try:
             user = user_service.create_user(
                 db,
                 email=payload.email,
                 password=payload.password,
                 full_name=payload.full_name,
-                role=payload.role,
+                role="student",  # self-registration is always student
                 school_id=payload.school_id,
                 grade=payload.grade,
+                status="pending",
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        token = create_access_token(user)
-        return TokenResponse(
-            access_token=token,
-            user_id=user.id,
-            role=user.role,
-            full_name=user.full_name,
-            school_id=user.school_id,
-        )
+        return {
+            "user_id": user.id,
+            "status": user.status,
+            "message": "Tài khoản đã được tạo. Vui lòng chờ admin phê duyệt.",
+        }
 
     @app.post("/api/auth/login", response_model=TokenResponse, tags=["auth"])
     def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-        user = user_service.authenticate(db, payload.email, payload.password)
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid email or password")
+        try:
+            user = user_service.authenticate(db, payload.email, payload.password)
+        except user_service.AccountStatusError as exc:
+            status_code = 401 if exc.status == "invalid" else 403
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
         return TokenResponse(
             access_token=create_access_token(user),
             user_id=user.id,
@@ -170,7 +171,55 @@ def create_app() -> FastAPI:
         rows = submission_service.student_analytics(db, user.id)
         return [AnalyticsEntry(**r) for r in rows]
 
+    # ─── Admin ───────────────────────────────────────────────
+    @app.get("/api/admin/users", tags=["admin"])
+    def admin_list_users(
+        status: str = "pending",
+        db: Session = Depends(get_db),
+        _user: models.User = Depends(require_role("admin")),
+    ) -> list[dict]:
+        users = user_service.list_users_by_status(db, status)
+        return [_user_view(u) for u in users]
+
+    @app.post("/api/admin/users/{user_id}/approve", tags=["admin"])
+    def admin_approve_user(
+        user_id: str,
+        db: Session = Depends(get_db),
+        current: models.User = Depends(require_role("admin")),
+    ) -> dict:
+        try:
+            user = user_service.set_user_status(db, user_id, "active", current.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _user_view(user)
+
+    @app.post("/api/admin/users/{user_id}/reject", tags=["admin"])
+    def admin_reject_user(
+        user_id: str,
+        db: Session = Depends(get_db),
+        current: models.User = Depends(require_role("admin")),
+    ) -> dict:
+        try:
+            user = user_service.set_user_status(db, user_id, "rejected", current.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _user_view(user)
+
     return app
+
+
+def _user_view(u: models.User) -> dict:
+    return {
+        "id": u.id,
+        "email": u.email,
+        "full_name": u.full_name,
+        "role": u.role,
+        "status": u.status,
+        "school_id": u.school_id,
+        "grade": u.grade,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "approved_at": u.approved_at.isoformat() if u.approved_at else None,
+    }
 
 
 def _submission_view(s: models.Submission) -> dict:

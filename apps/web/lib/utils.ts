@@ -25,10 +25,12 @@ export function gradeLetter(percent: number): 'A' | 'B' | 'C' | 'D' | 'F' {
 export function formatDateVi(d: Date): string {
   const day = d.getDate().toString().padStart(2, '0');
   const month = (d.getMonth() + 1).toString().padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`;
+  return `${day}/${month}/${d.getFullYear()}`;
 }
 
-export function pluralizeVi(count: number, singular: string): string {
-  return `${count} ${singular}`;
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m.toString().padStart(2, '0')}:${r.toString().padStart(2, '0')}`;
 }

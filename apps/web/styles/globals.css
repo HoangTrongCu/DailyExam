@@ -1,100 +1,102 @@
-/* Import design tokens — single source of truth */
+/* DailyExam — Gamified Edu Claymorphism tokens
+ * Palette from ui-ux-pro-max: Primary amber + secondary yellow + accent green
+ */
 @import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;500;600;700&family=Comic+Neue:wght@300;400;700&display=swap');
 
-/* Primitive → Semantic → Component tokens */
 :root {
-  --color-blue-50: #EFF6FF;
-  --color-blue-100: #DBEAFE;
-  --color-blue-200: #BFDBFE;
-  --color-blue-300: #93C5FD;
-  --color-blue-400: #60A5FA;
-  --color-blue-500: #3B82F6;
-  --color-blue-600: #2563EB;
-  --color-blue-700: #1D4ED8;
-  --color-blue-800: #1E40AF;
-  --color-blue-900: #1E3A8A;
-  --color-yellow-300: #FCD34D;
-  --color-yellow-400: #FBBF24;
-  --color-yellow-500: #F59E0B;
-  --color-yellow-600: #D97706;
-  --color-pink-300: #F9A8D4;
-  --color-pink-400: #F472B6;
-  --color-pink-500: #EC4899;
-  --color-pink-600: #DB2777;
-  --color-green-500: #22C55E;
-  --color-red-500: #EF4444;
-  --color-slate-50: #F8FAFC;
-  --color-slate-100: #F1F5F9;
-  --color-slate-200: #E2E8F0;
-  --color-slate-300: #CBD5E1;
-  --color-slate-400: #94A3B8;
-  --color-slate-500: #64748B;
-  --color-slate-600: #475569;
-  --color-slate-700: #334155;
-  --color-slate-800: #1E293B;
-  --color-slate-900: #0F172A;
+  /* Primitive — amber family */
+  --amber-50: #FFFBEB;
+  --amber-100: #FEF3C7;
+  --amber-200: #FDE68A;
+  --amber-300: #FCD34D;
+  --amber-400: #FBBF24;
+  --amber-500: #F59E0B;
+  --amber-600: #D97706;
+  --amber-700: #B45309;
+  --amber-800: #92400E;
 
-  --spacing-1: 4px;
-  --spacing-2: 8px;
-  --spacing-3: 12px;
-  --spacing-4: 16px;
-  --spacing-5: 20px;
-  --spacing-6: 24px;
-  --spacing-8: 32px;
-  --spacing-10: 40px;
-  --spacing-12: 48px;
-  --spacing-16: 64px;
+  /* Primitive — green family (accent, success) */
+  --green-50: #ECFDF5;
+  --green-100: #D1FAE5;
+  --green-400: #34D399;
+  --green-500: #10B981;
+  --green-600: #059669;
+  --green-700: #047857;
 
-  --radius-sm: 8px;
-  --radius-md: 16px;
-  --radius-lg: 20px;
-  --radius-xl: 28px;
-  --radius-2xl: 32px;
-  --radius-3xl: 40px;
-  --radius-full: 9999px;
+  /* Primitive — pink / rose (fun pop) */
+  --pink-100: #FCE7F3;
+  --pink-400: #F472B6;
+  --pink-500: #EC4899;
 
-  --shadow-clay-sm: 0 2px 4px rgba(37, 99, 235, 0.08), 0 4px 12px rgba(37, 99, 235, 0.06);
-  --shadow-clay-md: 0 4px 8px rgba(37, 99, 235, 0.10), 0 8px 24px rgba(37, 99, 235, 0.08), inset 0 -2px 4px rgba(255,255,255,0.4);
-  --shadow-clay-lg: 0 8px 16px rgba(37, 99, 235, 0.12), 0 16px 40px rgba(37, 99, 235, 0.10), inset 0 -3px 6px rgba(255,255,255,0.5);
-  --shadow-clay-inset: inset 0 2px 4px rgba(37, 99, 235, 0.15), inset 0 -2px 4px rgba(255,255,255,0.3);
+  /* Primitive — slate */
+  --slate-50: #F8FAFC;
+  --slate-100: #F1F5F9;
+  --slate-200: #E2E8F0;
+  --slate-400: #94A3B8;
+  --slate-500: #64748B;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-900: #0F172A;
+
+  --red-500: #EF4444;
+  --red-600: #DC2626;
 
   /* Semantic */
-  --color-primary: var(--color-blue-600);
-  --color-primary-hover: var(--color-blue-700);
-  --color-secondary: var(--color-yellow-500);
-  --color-accent: var(--color-pink-500);
-  --color-success: var(--color-green-500);
-  --color-danger: var(--color-red-500);
-  --color-background: var(--color-blue-50);
-  --color-surface: #FFFFFF;
-  --color-foreground: var(--color-slate-900);
-  --color-muted: var(--color-slate-100);
-  --color-muted-fg: var(--color-slate-500);
-  --color-border: var(--color-slate-200);
+  --color-primary: var(--amber-600);
+  --color-primary-hover: var(--amber-700);
+  --color-primary-fg: #FFFFFF;
+  --color-secondary: var(--amber-500);
+  --color-accent: var(--green-600);
+  --color-accent-hover: var(--green-700);
+  --color-success: var(--green-500);
+  --color-danger: var(--red-500);
+  --color-warning: var(--amber-500);
 
+  --color-background: var(--amber-50);
+  --color-surface: #FFFFFF;
+  --color-foreground: var(--slate-900);
+  --color-muted: var(--slate-100);
+  --color-muted-fg: var(--slate-500);
+  --color-border: #FAEEE1;
+
+  /* Typography */
   --font-heading: 'Baloo 2', system-ui, sans-serif;
   --font-body: 'Comic Neue', 'Baloo 2', system-ui, sans-serif;
 
-  --button-transition: all 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Shape — Claymorphism */
+  --radius-sm: 12px;
+  --radius-md: 20px;
+  --radius-lg: 28px;
+  --radius-xl: 32px;
+  --radius-2xl: 40px;
+  --radius-pill: 9999px;
+
+  /* Warm shadows for claymorphism */
+  --shadow-clay-sm: 0 2px 6px rgba(217, 119, 6, 0.10), 0 4px 12px rgba(217, 119, 6, 0.06);
+  --shadow-clay-md: 0 4px 12px rgba(217, 119, 6, 0.12), 0 8px 24px rgba(217, 119, 6, 0.10), inset 0 -2px 4px rgba(255, 255, 255, 0.4);
+  --shadow-clay-lg: 0 8px 20px rgba(217, 119, 6, 0.14), 0 16px 40px rgba(217, 119, 6, 0.12), inset 0 -3px 6px rgba(255, 255, 255, 0.5);
+  --shadow-clay-inset: inset 0 2px 6px rgba(217, 119, 6, 0.14);
+
+  /* Motion */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-micro: 180ms;
+  --button-transition: all var(--duration-micro) var(--ease-spring);
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+/* Reset */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
   font-family: var(--font-body);
   font-size: 16px;
   line-height: 1.5;
   color: var(--color-foreground);
-  background:
-    radial-gradient(circle at 10% 10%, rgba(249, 168, 212, 0.25), transparent 50%),
-    radial-gradient(circle at 90% 20%, rgba(253, 224, 71, 0.25), transparent 50%),
-    radial-gradient(circle at 50% 90%, rgba(147, 197, 253, 0.35), transparent 60%),
-    var(--color-background);
   min-height: 100vh;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(251, 191, 36, 0.25), transparent 50%),
+    radial-gradient(circle at 85% 15%, rgba(244, 114, 182, 0.22), transparent 55%),
+    radial-gradient(circle at 50% 95%, rgba(16, 185, 129, 0.22), transparent 55%),
+    var(--color-background);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -102,14 +104,11 @@ html, body {
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.2;
   letter-spacing: -0.01em;
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
+a { color: inherit; text-decoration: none; }
 
 button {
   font-family: inherit;
@@ -120,8 +119,21 @@ button {
 
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 4px var(--color-blue-200);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.35);
   border-radius: var(--radius-sm);
+}
+
+/* Confetti dot pattern for happy feedback (css-only) */
+.celebrate::before {
+  content: '';
+  position: absolute;
+  inset: -20px;
+  background:
+    radial-gradient(circle, var(--amber-400) 2px, transparent 2px) 0 0 / 30px 30px,
+    radial-gradient(circle, var(--green-400) 2px, transparent 2px) 15px 15px / 30px 30px;
+  opacity: 0.4;
+  pointer-events: none;
+  z-index: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

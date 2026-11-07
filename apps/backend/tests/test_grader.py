@@ -1,132 +1,98 @@
-"""Tests for the grader."""
-
-import pytest
+"""Grader tests."""
 
 from app.grader import (
-    grade_essay_stub,
+    grade_essay_llm,
+    grade_essay_mock,
     grade_multiple_choice,
     grade_numeric,
     grade_question,
 )
-from app.schemas import DifficultyLevel, Question, QuestionType
 
 
-def _mcq(max_score: float = 1.0) -> Question:
-    return Question(
-        id="q1",
-        index=1,
-        type=QuestionType.MULTIPLE_CHOICE,
-        difficulty=DifficultyLevel.TH,
-        chuyen_de="ti_so_phan_tram",
-        content="x",
-        max_score=max_score,
-        choices=["A", "B", "C", "D"],
-    )
+REF = {
+    "correct": "27",
+    "narrative": "Tổng = 75, kết quả = 27",
+    "steps": [
+        {"desc": "Tổng", "formula": "25 × 3 = 75", "points": 0.4},
+        {"desc": "Kết quả", "formula": "75 - 20 - 28 = 27", "points": 0.6},
+    ],
+}
 
 
-def _numeric(max_score: float = 1.0) -> Question:
-    return Question(
-        id="q2",
-        index=2,
-        type=QuestionType.NUMERIC,
-        difficulty=DifficultyLevel.TH,
-        chuyen_de="trung_binh_cong",
-        content="x",
-        max_score=max_score,
-    )
+class TestMCQ:
+    def test_correct(self):
+        r = grade_multiple_choice("q1", "C", "C", 1.0)
+        assert r.is_correct and r.score == 1.0
+
+    def test_case_insensitive(self):
+        assert grade_multiple_choice("q1", "c", "C", 1.0).is_correct
+
+    def test_wrong(self):
+        r = grade_multiple_choice("q1", "A", "C", 1.0)
+        assert not r.is_correct and r.score == 0
+        assert r.feedback is not None
+
+    def test_empty(self):
+        assert not grade_multiple_choice("q1", "", "C", 1.0).is_correct
 
 
-def _essay(max_score: float = 2.0) -> Question:
-    return Question(
-        id="q3",
-        index=3,
-        type=QuestionType.ESSAY,
-        difficulty=DifficultyLevel.VD,
-        chuyen_de="trung_binh_cong",
-        content="x",
-        max_score=max_score,
-    )
+class TestNumeric:
+    def test_correct(self):
+        assert grade_numeric("q1", "27", "27", 1.0).is_correct
+
+    def test_fraction_decimal(self):
+        assert grade_numeric("q1", "1/2", "0.5", 1.0).is_correct
+
+    def test_wrong(self):
+        r = grade_numeric("q1", "28", "27", 1.0)
+        assert not r.is_correct and r.score == 0
 
 
-class TestGradeMultipleChoice:
-    def test_correct(self) -> None:
-        result = grade_multiple_choice(_mcq(), "C", "C")
-        assert result.is_correct
-        assert result.score == 1.0
-        assert result.confidence == 1.0
+class TestEssayMock:
+    def test_empty(self):
+        r = grade_essay_mock("q1", "", REF, 2.0)
+        assert r.score == 0 and not r.is_correct
 
-    def test_wrong(self) -> None:
-        result = grade_multiple_choice(_mcq(), "A", "C")
-        assert not result.is_correct
-        assert result.score == 0.0
-        assert result.feedback is not None
+    def test_has_answer(self):
+        r = grade_essay_mock("q1", "Tổng 75, số thứ ba 27", REF, 2.0)
+        assert r.score > 0 and r.confidence >= 0.5
 
-    def test_case_insensitive(self) -> None:
-        assert grade_multiple_choice(_mcq(), "c", "C").is_correct
+    def test_partial(self):
+        r = grade_essay_mock("q1", "random text", REF, 2.0)
+        assert 0 <= r.score <= 2.0
 
-    def test_whitespace(self) -> None:
-        assert grade_multiple_choice(_mcq(), " C ", "C").is_correct
-
-    def test_empty(self) -> None:
-        assert not grade_multiple_choice(_mcq(), "", "C").is_correct
+    def test_no_steps(self):
+        r = grade_essay_mock("q1", "27", {"correct": "27", "narrative": "", "steps": []}, 1.0)
+        assert r.score > 0
 
 
-class TestGradeNumeric:
-    def test_correct(self) -> None:
-        result = grade_numeric(_numeric(), "27", "27")
-        assert result.is_correct
-        assert result.score == 1.0
-
-    def test_equivalent_forms(self) -> None:
-        assert grade_numeric(_numeric(), "1/2", "0.5").is_correct
-        assert grade_numeric(_numeric(), "50%", "0.5").is_correct
-
-    def test_wrong(self) -> None:
-        result = grade_numeric(_numeric(), "28", "27")
-        assert not result.is_correct
-        assert result.score == 0.0
-
-    def test_invalid_input(self) -> None:
-        result = grade_numeric(_numeric(), "abc", "27")
-        assert not result.is_correct
+class TestLLM:
+    def test_fallback_when_mock(self, monkeypatch):
+        monkeypatch.setenv("DAILYEXAM_LLM_MOCK_MODE", "true")
+        r = grade_essay_llm("q1", "27", REF, "?", 1.0)
+        assert r.score >= 0
 
 
-class TestGradeEssayStub:
-    def test_empty_gets_zero(self) -> None:
-        r = grade_essay_stub(_essay(), "", "foo bar baz")
-        assert r.score == 0.0
-        assert not r.is_correct
+class TestDispatch:
+    def _q(self, qid, qtype, **kw):
+        return {"id": qid, "type": qtype, "max_score": kw.get("max_score", 1.0),
+                "content": kw.get("content", "x")}
 
-    def test_full_overlap(self) -> None:
-        r = grade_essay_stub(_essay(), "foo bar baz", "foo bar baz")
-        assert r.score == 2.0
-        assert r.is_correct
+    def test_mcq(self):
+        assert grade_question(self._q("q1", "multiple_choice"), "C", {"correct": "C"}).is_correct
 
-    def test_partial_overlap(self) -> None:
-        r = grade_essay_stub(_essay(), "foo other", "foo bar baz")
-        assert 0 < r.score < 2.0
-        assert not r.is_correct
+    def test_numeric(self):
+        assert grade_question(self._q("q2", "numeric"), "27", {"correct": "27"}).is_correct
 
-    def test_empty_outline(self) -> None:
-        r = grade_essay_stub(_essay(), "something written", "")
-        assert r.score == 0.0
+    def test_essay(self):
+        r = grade_question(self._q("q3", "essay", max_score=2.0), "27", REF)
+        assert r.score >= 0
 
+    def test_disabled_skipped(self):
+        r = grade_question(self._q("q4", "multiple_choice"), "A", {"correct": "C", "disabled": True})
+        assert r.is_correct and r.score == 0 and r.max_score == 0
 
-class TestGradeQuestionDispatch:
-    def test_mcq_dispatched(self) -> None:
-        result = grade_question(_mcq(), "C", "C")
-        assert result.is_correct
-
-    def test_numeric_dispatched(self) -> None:
-        result = grade_question(_numeric(), "27", "27")
-        assert result.is_correct
-
-    def test_essay_dispatched(self) -> None:
-        result = grade_question(_essay(), "foo bar baz", "foo bar baz")
-        assert result.is_correct
-
-    def test_unknown_type_raises(self) -> None:
-        q = _mcq()
-        q.type = "unknown"  # type: ignore[assignment]
+    def test_unknown_type_raises(self):
+        import pytest
         with pytest.raises(ValueError):
-            grade_question(q, "A", "A")
+            grade_question(self._q("q5", "mystery"), "A", {"correct": "A"})

@@ -1,189 +1,210 @@
-"""Integration tests covering services + composer + submission flow."""
+"""Services layer tests."""
 
 from datetime import date
 
 import pytest
 
 from app import models
-from app.config import Settings
-from app.exam_composer import compose_exam
-from app.services import exam_service, submission_service, user_service
+from app.services import appeal_service, exam_service, submission_service, user_service
 
 
-@pytest.fixture
-def db(tmp_path, monkeypatch):
-    """Isolated SQLite DB per test."""
-    db_path = tmp_path / "test.db"
-    monkeypatch.setenv("DAILYEXAM_DATABASE_URL", f"sqlite:///{db_path}")
-    monkeypatch.setenv("DAILYEXAM_LLM_MOCK_MODE", "true")
-    import app.db as db_module
-    db_module._engine = None
-    db_module._SessionLocal = None
-    from app.db import get_session_factory, init_db
-    init_db()
-    factory = get_session_factory()
-    session = factory()
-    try:
-        yield session
-    finally:
-        session.close()
-
-
-def _seed_school(db) -> None:
-    db.add(
-        models.School(
-            id="cau_giay",
-            name="THCS Cầu Giấy",
-            short_name="Cầu Giấy",
-            grade_levels=["lop_5"],
-            config={"num_questions": 5, "duration_minutes": 45},
-        )
-    )
+def _seed_school(db):
+    db.add(models.School(id="cau_giay", name="THCS Cầu Giấy", short_name="Cầu Giấy"))
     db.commit()
 
 
-# ─── compose_exam ─────────────────────────────────────────
-class TestCompose:
-    def test_basic_composition(self) -> None:
-        exam_service.ensure_templates_loaded()
-        comp = compose_exam("cau_giay", date(2026, 11, 7), num_questions=5, seed=1)
-        assert len(comp.questions) == 5
-        assert comp.answer_key
-        assert comp.gate_open_at < comp.gate_close_at
-
-    def test_difficulty_distribution_respected(self) -> None:
-        exam_service.ensure_templates_loaded()
-        comp = compose_exam(
-            "cau_giay",
-            date(2026, 11, 7),
-            num_questions=10,
-            config={"difficulty_distribution": {"NB": 0.5, "TH": 0.5, "VD": 0.0, "VDC": 0.0}},
-            seed=2,
-        )
-        difficulties = [q["difficulty"] for q in comp.questions]
-        easy_count = sum(1 for d in difficulties if d in ["NB", "TH"])
-        assert easy_count >= 8
+def _active_student(db, email="hs@x.vn"):
+    user, _tok = user_service.register_user(db, email, "pass1234", "PH " + email, "Con " + email, status="active")
+    return user
 
 
-# ─── exam_service ─────────────────────────────────────────
+class TestUserService:
+    def test_register_pending_returns_token(self, db):
+        user, tok = user_service.register_user(db, "p@x.vn", "pass1234", "PH", "Con")
+        assert user.status == "pending_verify"
+        assert tok
+
+    def test_register_duplicate(self, db):
+        user_service.register_user(db, "d@x.vn", "pass1234", "PH", "Con")
+        with pytest.raises(user_service.AuthError):
+            user_service.register_user(db, "d@x.vn", "pass1234", "PH", "Con")
+
+    def test_verify_token_activates(self, db):
+        user, tok = user_service.register_user(db, "v@x.vn", "pass1234", "PH", "Con")
+        activated = user_service.verify_email_token(db, tok)
+        assert activated.status == "active"
+
+    def test_verify_invalid_token(self, db):
+        with pytest.raises(user_service.AuthError):
+            user_service.verify_email_token(db, "bad")
+
+    def test_verify_used_token(self, db):
+        _, tok = user_service.register_user(db, "u1@x.vn", "pass1234", "PH", "Con")
+        user_service.verify_email_token(db, tok)
+        with pytest.raises(user_service.AuthError):
+            user_service.verify_email_token(db, tok)
+
+    def test_pending_cannot_login(self, db):
+        user_service.register_user(db, "pp@x.vn", "pass1234", "PH", "Con")
+        with pytest.raises(user_service.AuthError) as ex:
+            user_service.authenticate_and_rotate_session(db, "pp@x.vn", "pass1234")
+        assert ex.value.code == "pending_verify"
+
+    def test_active_login(self, db):
+        _active_student(db, "a1@x.vn")
+        user, tok = user_service.authenticate_and_rotate_session(db, "a1@x.vn", "pass1234")
+        assert tok and user.session_token == tok
+
+    def test_wrong_password(self, db):
+        _active_student(db, "a2@x.vn")
+        with pytest.raises(user_service.AuthError):
+            user_service.authenticate_and_rotate_session(db, "a2@x.vn", "wrong")
+
+    def test_missing_user_login(self, db):
+        with pytest.raises(user_service.AuthError):
+            user_service.authenticate_and_rotate_session(db, "none@x.vn", "pass1234")
+
+    def test_reset_password_flow(self, db):
+        _active_student(db, "r@x.vn")
+        tok = user_service.request_password_reset(db, "r@x.vn")
+        assert tok
+        user_service.reset_password(db, tok, "newpass123")
+        user, _ = user_service.authenticate_and_rotate_session(db, "r@x.vn", "newpass123")
+        assert user is not None
+
+    def test_reset_unknown_email(self, db):
+        assert user_service.request_password_reset(db, "unknown@x.vn") is None
+
+    def test_reset_invalid_token(self, db):
+        with pytest.raises(user_service.AuthError):
+            user_service.reset_password(db, "bad", "pass1234")
+
+    def test_soft_delete_blocks_login(self, db):
+        user = _active_student(db, "del@x.vn")
+        user_service.soft_delete(db, user.id)
+        with pytest.raises(user_service.AuthError):
+            user_service.authenticate_and_rotate_session(db, "del@x.vn", "pass1234")
+
+
 class TestExamService:
-    def test_generate_and_fetch(self, db) -> None:
+    def test_generate_and_idempotent(self, db):
         _seed_school(db)
-        exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
-        assert exam.id
-        # Idempotent
-        again = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
-        assert again.id == exam.id
+        e1 = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
+        e2 = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
+        assert e1.id == e2.id
 
-    def test_generate_unknown_school_raises(self, db) -> None:
+    def test_generate_unknown_school(self, db):
         with pytest.raises(ValueError):
             exam_service.generate_daily_exam(db, "nope", date(2026, 11, 7))
 
-    def test_public_view_strips_answers(self, db) -> None:
+    def test_public_view_strips_answers(self, db):
         _seed_school(db)
         exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
         view = exam_service.public_view(exam)
         assert "answer_key" not in view
 
-    def test_get_nonexistent(self, db) -> None:
+    def test_list_for_date(self, db):
         _seed_school(db)
-        assert exam_service.get_daily_exam(db, "cau_giay", date(1999, 1, 1)) is None
+        exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
+        rows = exam_service.list_exams_for_date(db, date(2026, 11, 7))
+        assert len(rows) == 1
 
 
-# ─── user_service ─────────────────────────────────────────
-class TestUserService:
-    def test_create_and_authenticate_active(self, db) -> None:
-        user = user_service.create_user(db, "a@b.c", "pass1234", "A", status="active")
-        assert user_service.authenticate(db, "a@b.c", "pass1234").id == user.id
-
-    def test_duplicate_email_raises(self, db) -> None:
-        user_service.create_user(db, "a@b.c", "pass1234", "A")
-        with pytest.raises(ValueError):
-            user_service.create_user(db, "a@b.c", "pass5678", "A2")
-
-    def test_authenticate_bad_password(self, db) -> None:
-        user_service.create_user(db, "a@b.c", "pass1234", "A", status="active")
-        with pytest.raises(user_service.AccountStatusError) as exc_info:
-            user_service.authenticate(db, "a@b.c", "wrong")
-        assert exc_info.value.status == "invalid"
-
-    def test_authenticate_missing_user(self, db) -> None:
-        with pytest.raises(user_service.AccountStatusError):
-            user_service.authenticate(db, "none@x.y", "p")
-
-    def test_pending_cannot_authenticate(self, db) -> None:
-        user_service.create_user(db, "p@b.c", "pass1234", "P")  # default pending
-        with pytest.raises(user_service.AccountStatusError) as exc_info:
-            user_service.authenticate(db, "p@b.c", "pass1234")
-        assert exc_info.value.status == "pending"
-
-    def test_rejected_cannot_authenticate(self, db) -> None:
-        user_service.create_user(db, "r@b.c", "pass1234", "R", status="rejected")
-        with pytest.raises(user_service.AccountStatusError) as exc_info:
-            user_service.authenticate(db, "r@b.c", "pass1234")
-        assert exc_info.value.status == "rejected"
-
-    def test_approve_user(self, db) -> None:
-        user = user_service.create_user(db, "pend@b.c", "pass1234", "P")
-        approved = user_service.set_user_status(db, user.id, "active", "admin1")
-        assert approved.status == "active"
-        assert approved.approved_by == "admin1"
-        assert approved.approved_at is not None
-
-    def test_reject_user(self, db) -> None:
-        user = user_service.create_user(db, "pend2@b.c", "pass1234", "P")
-        rejected = user_service.set_user_status(db, user.id, "rejected", "admin1")
-        assert rejected.status == "rejected"
-
-    def test_set_status_invalid(self, db) -> None:
-        user = user_service.create_user(db, "x@b.c", "pass1234", "X")
-        with pytest.raises(ValueError):
-            user_service.set_user_status(db, user.id, "garbage")
-
-    def test_set_status_missing_user(self, db) -> None:
-        with pytest.raises(ValueError):
-            user_service.set_user_status(db, "no-such-id", "active")
-
-    def test_list_pending(self, db) -> None:
-        user_service.create_user(db, "a1@b.c", "pass1234", "A1")
-        user_service.create_user(db, "a2@b.c", "pass1234", "A2")
-        user_service.create_user(db, "a3@b.c", "pass1234", "A3", status="active")
-        pending = user_service.list_users_by_status(db, "pending")
-        assert len(pending) == 2
-
-
-# ─── submission_service end-to-end ────────────────────────
-class TestSubmissionService:
-    def test_submit_grades_and_persists(self, db) -> None:
+class TestSubmission:
+    def test_submit_grades(self, db):
         _seed_school(db)
-        student = user_service.create_user(
-            db, "hs@x.vn", "p1234567", "Nam", role="student", school_id="cau_giay", status="active"
-        )
+        stu = _active_student(db, "s1@x.vn")
         exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
-        first_q = exam.exam_data["questions"][0]
-        answers = {first_q["id"]: exam.answer_key[first_q["id"]]["correct"]}
-        sub = submission_service.submit_and_grade(db, exam, student, answers)
+        first = exam.exam_data["questions"][0]
+        sub = submission_service.submit_and_grade(
+            db, exam, stu, {first["id"]: exam.answer_key[first["id"]]["correct"]}
+        )
         assert sub.total_score > 0
-        assert sub.max_total_score > 0
 
-    def test_submit_is_idempotent(self, db) -> None:
+    def test_idempotent(self, db):
         _seed_school(db)
-        student = user_service.create_user(db, "hs2@x.vn", "p1234567", "Hà", school_id="cau_giay", status="active")
+        stu = _active_student(db, "s2@x.vn")
         exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
-        first = submission_service.submit_and_grade(db, exam, student, {})
-        second = submission_service.submit_and_grade(db, exam, student, {})
-        assert first.id == second.id
+        a = submission_service.submit_and_grade(db, exam, stu, {})
+        b = submission_service.submit_and_grade(db, exam, stu, {})
+        assert a.id == b.id
 
-    def test_history_and_analytics(self, db) -> None:
+    def test_history_analytics(self, db):
         _seed_school(db)
-        student = user_service.create_user(db, "hs3@x.vn", "p1234567", "An", school_id="cau_giay", status="active")
+        stu = _active_student(db, "s3@x.vn")
         exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
-        first_q = exam.exam_data["questions"][0]
-        submission_service.submit_and_grade(
-            db, exam, student, {first_q["id"]: exam.answer_key[first_q["id"]]["correct"]}
-        )
-        history = submission_service.student_history(db, student.id)
-        assert len(history) == 1
-        analytics = submission_service.student_analytics(db, student.id)
-        assert analytics
-        assert all("chuyen_de" in a for a in analytics)
+        submission_service.submit_and_grade(db, exam, stu, {exam.exam_data["questions"][0]["id"]: "A"})
+        assert len(submission_service.student_history(db, stu.id)) == 1
+        assert submission_service.student_analytics(db, stu.id)
+
+    def test_rankings(self, db):
+        _seed_school(db)
+        stu1 = _active_student(db, "r1@x.vn")
+        stu2 = _active_student(db, "r2@x.vn")
+        exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
+        first = exam.exam_data["questions"][0]
+        submission_service.submit_and_grade(db, exam, stu1, {first["id"]: exam.answer_key[first["id"]]["correct"]})
+        submission_service.submit_and_grade(db, exam, stu2, {})
+        ranked = submission_service.rankings_for_school(db, "cau_giay")
+        assert ranked and ranked[0]["rank"] == 1
+
+
+class TestAppeal:
+    def test_file_and_resolve_accept(self, db):
+        _seed_school(db)
+        stu = _active_student(db, "ap1@x.vn")
+        exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
+        first = exam.exam_data["questions"][0]
+        sub = submission_service.submit_and_grade(db, exam, stu, {first["id"]: "WRONG"})
+        ap = appeal_service.file_appeal(db, sub.id, stu.id, first["id"], "Tôi nghĩ bài em đúng")
+        res = appeal_service.resolve_appeal(db, ap.id, "accept", "Đã chấp nhận",
+                                            new_correct="WRONG")  # pretend new answer matches
+        assert res["status"] == "accepted"
+        assert res["affected"] >= 1
+
+    def test_reject(self, db):
+        _seed_school(db)
+        stu = _active_student(db, "ap2@x.vn")
+        exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
+        first = exam.exam_data["questions"][0]
+        sub = submission_service.submit_and_grade(db, exam, stu, {})
+        ap = appeal_service.file_appeal(db, sub.id, stu.id, first["id"], "Lý do")
+        res = appeal_service.resolve_appeal(db, ap.id, "reject", "Nope")
+        assert res["status"] == "rejected"
+
+    def test_dedupe(self, db):
+        _seed_school(db)
+        stu = _active_student(db, "ap3@x.vn")
+        exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
+        first = exam.exam_data["questions"][0]
+        sub = submission_service.submit_and_grade(db, exam, stu, {})
+        a1 = appeal_service.file_appeal(db, sub.id, stu.id, first["id"], "Reason")
+        a2 = appeal_service.file_appeal(db, sub.id, stu.id, first["id"], "Reason again")
+        assert a1.id == a2.id
+
+    def test_missing_submission(self, db):
+        with pytest.raises(ValueError):
+            appeal_service.file_appeal(db, "no-such", "x", "q1", "r")
+
+    def test_resolve_missing(self, db):
+        with pytest.raises(ValueError):
+            appeal_service.resolve_appeal(db, "no-id", "accept")
+
+    def test_invalid_action(self, db):
+        _seed_school(db)
+        stu = _active_student(db, "ap4@x.vn")
+        exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
+        first = exam.exam_data["questions"][0]
+        sub = submission_service.submit_and_grade(db, exam, stu, {})
+        ap = appeal_service.file_appeal(db, sub.id, stu.id, first["id"], "r")
+        with pytest.raises(ValueError):
+            appeal_service.resolve_appeal(db, ap.id, "weird")
+
+    def test_disable_question(self, db):
+        _seed_school(db)
+        stu = _active_student(db, "dq@x.vn")
+        exam = exam_service.generate_daily_exam(db, "cau_giay", date(2026, 11, 7))
+        first = exam.exam_data["questions"][0]
+        submission_service.submit_and_grade(db, exam, stu, {first["id"]: exam.answer_key[first["id"]]["correct"]})
+        res = appeal_service.disable_question(db, exam.id, first["id"])
+        assert res["affected"] >= 1

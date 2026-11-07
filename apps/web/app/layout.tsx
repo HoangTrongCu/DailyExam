@@ -4,14 +4,11 @@ import { AuthProvider } from '@/components/AuthProvider';
 
 export const metadata: Metadata = {
   title: 'DailyExam — Luyện thi mỗi ngày',
-  description:
-    'Nền tảng tự động sinh đề và chấm bài thông minh cho học sinh tiểu học và THCS. Mỗi ngày một đề mới, luyện thi hiệu quả.',
+  description: 'Tự động sinh đề và chấm bài giúp HS lớp 5 luyện thi tuyển sinh lớp 6 CLC.',
 };
 
 export const viewport: Viewport = {
-  width: 'device-width',
-  initialScale: 1,
-  themeColor: '#2563EB',
+  width: 'device-width', initialScale: 1, themeColor: '#D97706',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

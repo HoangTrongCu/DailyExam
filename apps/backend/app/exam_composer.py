@@ -1,136 +1,104 @@
-"""Compose daily exams from template bank according to school style config."""
-
-from __future__ import annotations
+"""Compose daily exam from blueprint."""
 
 import random
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from app.config import get_settings
-from app.schemas import DifficultyLevel
-from app.template_engine import RenderedQuestion, TemplateSpec, list_templates, render
+from app.template_engine import TemplateSpec, list_templates, load_all_templates, render
 
 ICT = timezone(timedelta(hours=7))
 
 
 @dataclass
 class ExamComposition:
-    """A fully composed exam ready to persist."""
-
     id: str
     school_id: str
     exam_date: date
     duration_minutes: int
-    questions: list[dict[str, Any]]  # serialisable question dicts (no correct answer!)
-    answer_key: dict[str, dict[str, Any]]  # qid -> {correct, steps, narrative}
+    questions: list[dict[str, Any]]
+    answer_key: dict[str, dict[str, Any]]
     gate_open_at: datetime
     gate_close_at: datetime
 
 
-def _default_distribution() -> dict[DifficultyLevel, float]:
-    return {
-        DifficultyLevel.NB: 0.2,
-        DifficultyLevel.TH: 0.3,
-        DifficultyLevel.VD: 0.35,
-        DifficultyLevel.VDC: 0.15,
-    }
+DEFAULT_BLUEPRINT = {
+    "exam_duration_minutes": 60,
+    "total_questions": 10,
+    "difficulty_distribution": {"NB": 0.2, "TH": 0.3, "VD": 0.35, "VDC": 0.15},
+    "question_type_distribution": {"multiple_choice": 5, "numeric": 3, "essay": 2},
+    "chuyen_de_weights": {},
+}
 
 
 def compose_exam(
     school_id: str,
     exam_date: date,
-    num_questions: int = 10,
-    duration_minutes: int = 60,
-    config: dict[str, Any] | None = None,
-    seed: int | None = None,
+    blueprint: dict | None = None,
+    seed: int | str | None = None,
 ) -> ExamComposition:
-    """Build a daily exam for the given school and date."""
-    config = config or {}
+    """Compose exam per blueprint. Falls back to DEFAULT_BLUEPRINT for missing fields."""
+    load_all_templates()
+    bp = {**DEFAULT_BLUEPRINT, **(blueprint or {})}
     rng = random.Random(seed if seed is not None else f"{school_id}:{exam_date.isoformat()}")
 
-    distribution = _parse_distribution(config.get("difficulty_distribution")) or _default_distribution()
-    chuyen_de_weights = config.get("chuyen_de_weights", {})
+    type_dist = bp["question_type_distribution"]
+    qtype_slots: list[str] = []
+    for qtype, count in type_dist.items():
+        qtype_slots.extend([qtype] * count)
 
-    counts = _allocate_counts(num_questions, distribution)
-    questions: list[RenderedQuestion] = []
+    # If total_questions differs from sum of type dist, pad or trim
+    total = bp["total_questions"]
+    if len(qtype_slots) < total:
+        qtype_slots.extend(["multiple_choice"] * (total - len(qtype_slots)))
+    qtype_slots = qtype_slots[:total]
+    rng.shuffle(qtype_slots)
 
-    for difficulty, n in counts.items():
-        candidates = list_templates(difficulty=difficulty)
+    weights = bp.get("chuyen_de_weights", {})
+    questions: list = []
+    for qtype in qtype_slots:
+        candidates = list_templates(question_type=qtype)
         if not candidates:
-            # Fall back to any difficulty
             candidates = list_templates()
-        for _ in range(n):
-            spec = _pick_template(candidates, chuyen_de_weights, rng)
-            questions.append(render(spec, rng))
+        spec = _weighted_pick(candidates, weights, rng)
+        questions.append(render(spec, rng))
 
-    rng.shuffle(questions)
-
-    qlist: list[dict[str, Any]] = []
-    answers: dict[str, dict[str, Any]] = {}
-    for index, q in enumerate(questions, start=1):
-        qid = f"q{index}"
-        qlist.append(
-            {
-                "id": qid,
-                "index": index,
-                "type": q.question_type.value,
-                "difficulty": q.difficulty.value,
-                "chuyen_de": q.chuyen_de,
-                "content": q.content,
-                "choices": q.choices,
-                "max_score": q.max_score,
-                "unit": q.unit,
-                "template_id": q.template_id,
-            }
-        )
-        answers[qid] = {
+    qlist, akey = [], {}
+    for idx, q in enumerate(questions, start=1):
+        qid = f"q{idx}"
+        qlist.append({
+            "id": qid,
+            "index": idx,
+            "type": q.question_type,
+            "difficulty": q.difficulty,
+            "chuyen_de": q.chuyen_de,
+            "content": q.content,
+            "choices": q.choices,
+            "max_score": q.max_score,
+            "unit": q.unit,
+            "template_id": q.template_id,
+        })
+        akey[qid] = {
             "correct": q.correct_answer,
             "steps": q.solution_steps,
             "narrative": q.solution_narrative,
+            "disabled": False,
         }
 
-    settings = get_settings()
-    gate_open = datetime.combine(exam_date, time(settings.gate_open_hour, 0), tzinfo=ICT)
-    gate_close = datetime.combine(exam_date, time(settings.gate_close_hour, 0), tzinfo=ICT)
-
+    gate_open = datetime.combine(exam_date, time(0, 0), tzinfo=ICT)
+    gate_close = datetime.combine(exam_date + timedelta(days=1), time(0, 0), tzinfo=ICT)
     return ExamComposition(
         id=f"{school_id}:{exam_date.isoformat()}",
         school_id=school_id,
         exam_date=exam_date,
-        duration_minutes=duration_minutes,
+        duration_minutes=bp["exam_duration_minutes"],
         questions=qlist,
-        answer_key=answers,
+        answer_key=akey,
         gate_open_at=gate_open,
         gate_close_at=gate_close,
     )
 
 
-def _parse_distribution(raw: dict[str, float] | None) -> dict[DifficultyLevel, float] | None:
-    if not raw:
-        return None
-    return {DifficultyLevel(k): float(v) for k, v in raw.items()}
-
-
-def _allocate_counts(total: int, distribution: dict[DifficultyLevel, float]) -> dict[DifficultyLevel, int]:
-    total_weight = sum(distribution.values()) or 1.0
-    raw = {level: (weight / total_weight) * total for level, weight in distribution.items()}
-    counts = {level: int(v) for level, v in raw.items()}
-    remainder = total - sum(counts.values())
-    # Distribute remainder by largest fractional part
-    fracs = sorted(raw.items(), key=lambda kv: (kv[1] - int(kv[1])), reverse=True)
-    for level, _ in fracs:
-        if remainder <= 0:
-            break
-        counts[level] += 1
-        remainder -= 1
-    return counts
-
-
-def _pick_template(
-    specs: list[TemplateSpec],
-    chuyen_de_weights: dict[str, float],
-    rng: random.Random,
-) -> TemplateSpec:
-    weights = [max(chuyen_de_weights.get(spec.chuyen_de, 1.0), 0.1) for spec in specs]
-    return rng.choices(specs, weights=weights, k=1)[0]
+def _weighted_pick(specs: list[TemplateSpec], weights: dict[str, float], rng: random.Random) -> TemplateSpec:
+    w = [max(weights.get(s.chuyen_de, 1.0), 0.1) for s in specs]
+    return rng.choices(specs, weights=w, k=1)[0]

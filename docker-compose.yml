@@ -5,20 +5,17 @@ services:
       POSTGRES_USER: dailyexam
       POSTGRES_PASSWORD: dailyexam
       POSTGRES_DB: dailyexam
-    ports:
-      - "55432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+    ports: ["55432:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dailyexam -d dailyexam"]
+      test: ["CMD-SHELL", "pg_isready -U dailyexam"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "56379:6379"
+    ports: ["56379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -31,26 +28,23 @@ services:
       dockerfile: Dockerfile
     environment:
       DAILYEXAM_ENVIRONMENT: development
-      DATABASE_URL: postgresql://dailyexam:dailyexam@postgres:5432/dailyexam
-      REDIS_URL: redis://redis:6379/0
-    ports:
-      - "8001:8000"
+      DAILYEXAM_DATABASE_URL: sqlite:///./dailyexam.db
+      DAILYEXAM_LLM_MOCK_MODE: "true"
+      DAILYEXAM_EMAIL_PROVIDER: mock
+      DAILYEXAM_BASE_URL: http://localhost:3001
+    ports: ["8001:8000"]
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
 
   web:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-    ports:
-      - "3001:3000"
-    depends_on:
-      - backend
+      NEXT_PUBLIC_API_URL: http://localhost:8001
+    ports: ["3001:3000"]
+    depends_on: [backend]
 
 volumes:
   postgres_data:

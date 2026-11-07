@@ -28,11 +28,13 @@ services:
       dockerfile: Dockerfile
     environment:
       DAILYEXAM_ENVIRONMENT: development
-      DAILYEXAM_DATABASE_URL: sqlite:///./dailyexam.db
+      DAILYEXAM_DATABASE_URL: sqlite:////data/dailyexam.db
       DAILYEXAM_LLM_MOCK_MODE: "true"
       DAILYEXAM_EMAIL_PROVIDER: mock
       DAILYEXAM_BASE_URL: http://localhost:3001
     ports: ["8001:8000"]
+    volumes:
+      - backend_data:/data
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -48,3 +50,4 @@ services:
 
 volumes:
   postgres_data:
+  backend_data:

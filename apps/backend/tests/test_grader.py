@@ -53,17 +53,26 @@ class TestEssayMock:
         r = grade_essay_mock("q1", "", REF, 2.0)
         assert r.score == 0 and not r.is_correct
 
-    def test_has_answer(self):
+    def test_correct_answer_gets_full(self):
         r = grade_essay_mock("q1", "Tổng 75, số thứ ba 27", REF, 2.0)
-        assert r.score > 0 and r.confidence >= 0.5
+        assert r.score == 2.0
+        assert r.is_correct
+        assert r.confidence >= 0.8
 
-    def test_partial(self):
+    def test_wrong_gets_partial_from_steps(self):
+        # Answer "26" is wrong but overlaps "tổng" / "75" keywords
+        r = grade_essay_mock("q1", "tổng 75 bước kết quả", REF, 2.0)
+        assert 0 < r.score < 2.0
+        assert not r.is_correct
+
+    def test_random_text(self):
         r = grade_essay_mock("q1", "random text", REF, 2.0)
-        assert 0 <= r.score <= 2.0
+        assert r.score >= 0 and r.score < 2.0
+        assert not r.is_correct
 
-    def test_no_steps(self):
+    def test_no_steps_but_correct(self):
         r = grade_essay_mock("q1", "27", {"correct": "27", "narrative": "", "steps": []}, 1.0)
-        assert r.score > 0
+        assert r.score == 1.0
 
 
 class TestLLM:

@@ -54,12 +54,27 @@ def _tokens(s: str) -> set[str]:
 
 
 def grade_essay_mock(qid: str, answer: str, reference: dict[str, Any], max_score: float) -> GradeResult:
-    """Fallback rule-based essay grader."""
+    """Fallback rule-based essay grader.
+
+    Policy:
+    - No answer → 0.
+    - Correct final result → full marks (HS làm đúng, không trừ vì AI không hiểu hết lời giải).
+    - Wrong final result → partial credit via keyword overlap on each step.
+    """
     if not answer.strip():
         return GradeResult(qid, 0.0, max_score, False, "Chưa có bài làm.", 1.0)
+
     correct = str(reference.get("correct", "")).strip()
     narrative = reference.get("narrative", "")
     steps = reference.get("steps", []) or []
+    has_correct = bool(correct) and correct.lower() in answer.lower()
+
+    if has_correct:
+        total = max_score
+        fb = "Kết quả cuối của em đúng. Lời giải chuẩn:\n" + narrative
+        return GradeResult(qid, total, max_score, True, fb, 0.85)
+
+    # Wrong answer → partial credit from step overlap
     stoks = _tokens(answer)
     total = 0.0
     for step in steps:
@@ -67,15 +82,9 @@ def grade_essay_mock(qid: str, answer: str, reference: dict[str, Any], max_score
         ref_tok = _tokens(step.get("formula", "") + " " + step.get("desc", ""))
         ratio = (len(ref_tok & stoks) / len(ref_tok)) if ref_tok else 0.0
         total += round(pts * ratio, 2)
-    has_correct = correct and correct.lower() in answer.lower()
-    if has_correct:
-        total = max(total, max_score * 0.8)
     total = min(round(total, 2), max_score)
-    fb = (
-        ("Kết quả cuối của em đúng. " if has_correct else "Chưa thấy kết quả cuối trong bài. ")
-        + "Lời giải chuẩn:\n" + narrative
-    )
-    return GradeResult(qid, total, max_score, has_correct, fb, 0.65 if has_correct else 0.5)
+    fb = "Chưa thấy kết quả cuối đúng trong bài. Lời giải chuẩn:\n" + narrative
+    return GradeResult(qid, total, max_score, False, fb, 0.5)
 
 
 def grade_essay_llm(qid: str, answer: str, reference: dict[str, Any], question: str, max_score: float) -> GradeResult:
